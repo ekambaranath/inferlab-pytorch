@@ -58,3 +58,14 @@ def test_layer_fused_equals_unfused():
     layer.fused = True
     fused = layer(x)
     assert ((fused.float() - unfused.float()).norm() / unfused.float().norm()) < 5e-3
+
+
+def test_kernel_large_activations_stay_finite():
+    torch.manual_seed(3)
+    N, K = 48, 256
+    q, s = quantize_per_channel_int8(torch.randn(N, K))
+    x = (1000 * torch.randn(1, K)).to(DEV).half()
+    out = int8_gemv(x, q.to(DEV), s.to(DEV).half())  # fp32 accumulation, scale in the epilogue
+    ref = _ref(x, q.to(DEV), s.to(DEV))
+    assert torch.isfinite(out).all()
+    assert ((out.float() - ref).norm() / ref.norm()) < 2e-3

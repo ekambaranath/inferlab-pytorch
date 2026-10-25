@@ -71,7 +71,7 @@ def run(ms: list[int], peak_bw: float | None, dtype: torch.dtype) -> list[dict]:
                 return F.linear(x, w16)
 
             def unfused():
-                return F.linear(x, q.to(dtype)) * scale16
+                return F.linear(x, q.to(dtype) * scale16[:, None])
 
             def fused():
                 return int8_gemv(x, q, scale16)

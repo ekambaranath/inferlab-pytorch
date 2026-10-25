@@ -55,3 +55,16 @@ def test_quantize_model_skips_lm_head_and_saves_memory():
     assert isinstance(m.lm_head, nn.Linear)  # skipped
     assert model_weight_bytes(m) < before * 0.5
     assert m(torch.randn(2, 512)).shape == (2, 100)
+
+
+def test_fp16_large_activations_do_not_overflow():
+    """Regression: matmul on raw int8 values then scaling the output overflowed fp16
+    (NaN perplexity on Qwen2.5). Dequantizing before the matmul must stay finite."""
+    torch.manual_seed(0)
+    lin = nn.Linear(256, 64, bias=False).half()
+    layer = Int8WeightOnlyLinear.from_linear(lin, torch.float16)
+    x = (1000 * torch.randn(1, 256)).half()
+    out = layer(x)
+    ref = lin.float()(x.float())
+    assert torch.isfinite(out).all()
+    assert ((out.float() - ref).norm() / ref.norm()) < 0.03

@@ -58,15 +58,14 @@ class Int8WeightOnlyLinear(nn.Module):
             from .kernels import int8_gemv
             return int8_gemv(x, self.qweight, self.scale.to(x.dtype),
                              None if self.bias is None else self.bias.to(x.dtype))
-        # Dequantize: int8 -> compute dtype, then apply the per-row scale.
-        # Scaling the *output* instead of the weight keeps the big tensor in
-        # plain int8->fp conversion and moves the multiply to a small tensor.
-        w = self.qweight.to(x.dtype)
-        y = torch.nn.functional.linear(x, w)
-        y = y * self.scale.to(x.dtype)
-        if self.bias is not None:
-            y = y + self.bias.to(x.dtype)
-        return y
+        # Dequantize the full weight BEFORE the matmul: w = q * scale.
+        # (Do not matmul with raw int8 values and scale the output afterwards: raw
+        # values are up to 127 and are ~1/scale times larger than the real weights, so
+        # in fp16 the products overflow to inf/NaN on models with large activations.
+        # That was a real bug here, found on Qwen2.5 on a T4; see tests/test_quant.py.)
+        w = self.qweight.to(x.dtype) * self.scale.to(x.dtype)[:, None]
+        bias = None if self.bias is None else self.bias.to(x.dtype)
+        return torch.nn.functional.linear(x, w, bias)
 
     def extra_repr(self) -> str:
         return f"in={self.in_features}, out={self.out_features}, int8, per-channel"
